@@ -280,9 +280,9 @@ class CrossStrengthen(nn.Module):
     def  __init__(self, dim, num_heads=8, bias=False, LayerNorm_type='WithBias'):
         super(CrossStrengthen, self).__init__()
         self.num_heads = num_heads
-        self.temperature1 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature2 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature3 = nn.Parameter(torch.ones(num_heads, num_heads, 1))
+        self.temperature1 = nn.Parameter(torch.ones(num_heads, 1, 1))
+        self.temperature2 = nn.Parameter(torch.ones(num_heads, 1, 1))
+        self.temperature3 = nn.Parameter(torch.ones(num_heads, 1, 1))
         ffn_expansion_factor = 4
         # x
         self.qkv_x_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
@@ -309,7 +309,7 @@ class CrossStrengthen(nn.Module):
         self.norm_y = LayerNorm(dim, LayerNorm_type)
         self.fuse = nn.Sequential(nn.Conv2d(dim, dim, kernel_size=1), nn.Conv2d(dim, dim, kernel_size=3, padding=1),
                                   nn.BatchNorm2d(dim), nn.ReLU(inplace=True))
-    # x last y feature
+
     def forward(self, x, y):
         input = x
         # Attention part
@@ -340,6 +340,7 @@ class CrossStrengthen(nn.Module):
         out = (attnx @ attny @ vx) @ (vx.transpose(-2, -1) @ vy) * self.temperature3
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=H, w=W)
         out = self.project_out(out)
+
         out = input + out
         out = out + self.ffn(self.norm(out))
         out = self.fuse(input + input * out)
@@ -373,7 +374,6 @@ class Decoder(nn.Module):
     def __init__(self, channels):
         super(Decoder, self).__init__()
         self.pyramid_pooling = PyramidPooling(512, channels)
-        # self.conv = nn.Conv2d(512, channels, 1, padding='same')
         self.sfa1 = SFTA(512, channels)
         self.sfa2 = SFTA(320, channels)
         self.sft1 = SFTA(128, channels)
@@ -387,7 +387,6 @@ class Decoder(nn.Module):
     def forward(self, E1, E2, E3, E4, shape):
         # E1 512 12 E2 320 24 E3 128 48 E4 64 96 96
         SM = self.pyramid_pooling(E1)
-        # SM = self.conv(E1)
         S4 = self.sfa1(E1, SM)
         S3 = self.sfa2(E2, S4)
         S2 = self.sft1(E3, S3)

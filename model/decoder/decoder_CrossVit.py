@@ -280,25 +280,16 @@ class CrossStrengthen(nn.Module):
     def  __init__(self, dim, num_heads=8, bias=False, LayerNorm_type='WithBias'):
         super(CrossStrengthen, self).__init__()
         self.num_heads = num_heads
-        self.temperature1 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
+        self.temperature = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
         self.temperature2 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
         self.temperature3 = nn.Parameter(torch.ones(num_heads, num_heads, 1))
         ffn_expansion_factor = 4
-        # x
+
         self.qkv_x_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_x_1 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_x_2 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-
-        self.qkvx1conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
-        self.qkvx2conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
-        self.qkvx3conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
-
-        # y
-        self.qkv_y_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
         self.qkv_y_1 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
         self.qkv_y_2 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
 
-        self.qkvy1conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
+        self.qkvx1conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
         self.qkvy2conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
         self.qkvy3conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
 
@@ -316,34 +307,23 @@ class CrossStrengthen(nn.Module):
         B, C, H, W = x.shape
         x = self.norm_x(x)
         y = self.norm_y(y)
-        qx = self.qkvx1conv(self.qkv_x_0(x))
-        kx = self.qkvx2conv(self.qkv_x_1(x))
-        vx = self.qkvx3conv(self.qkv_x_2(x))
-        qx = rearrange(qx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        kx = rearrange(kx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        vx = rearrange(vx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        qx = torch.nn.functional.normalize(qx, dim=-1)
-        kx = torch.nn.functional.normalize(kx, dim=-1)
+        q = self.qkvx1conv(self.qkv_x_0(x))
+        k = self.qkvy2conv(self.qkv_y_1(y))
+        v = self.qkvy3conv(self.qkv_y_2(y))
 
-        qy = self.qkvy1conv(self.qkv_y_0(y))
-        ky = self.qkvy2conv(self.qkv_y_1(y))
-        vy = self.qkvy3conv(self.qkv_y_2(y))
-        qy = rearrange(qy, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        ky = rearrange(ky, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        vy = rearrange(vy, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        qy = torch.nn.functional.normalize(qy, dim=-1)
-        ky = torch.nn.functional.normalize(ky, dim=-1)
+        q = rearrange(q, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
+        k = rearrange(k, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
+        v = rearrange(v, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
 
-        attnx = ((qx @ ky.transpose(-2, -1)) * self.temperature1).softmax(dim=-1)
-        attny = ((qy @ kx.transpose(-2, -1)) * self.temperature2).softmax(dim=-1)
-
-        out = (attnx @ attny @ vx) @ (vx.transpose(-2, -1) @ vy) * self.temperature3
+        q = torch.nn.functional.normalize(q, dim=-1)
+        k = torch.nn.functional.normalize(k, dim=-1)
+        attn = (q @ k.transpose(-2, -1)) * self.temperature
+        attn = attn.softmax(dim=-1)
+        out = (attn @ v)
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=H, w=W)
         out = self.project_out(out)
-        out = input + out
-        out = out + self.ffn(self.norm(out))
-        out = self.fuse(input + input * out)
         return out
+
     def initialize(self):
         weight_init(self)
 

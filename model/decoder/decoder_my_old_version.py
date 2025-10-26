@@ -143,29 +143,76 @@ class h_sigmoid(nn.Module):
     def initialize(self):
         weight_init(self)
 
-class SFTA(nn.Module):
+class SFA(nn.Module):
     def __init__(self, in_channel, out_channel):
-        super(SFTA, self).__init__()
-        self.down_channel = nn.Sequential(
-            conv3x3(in_channel, out_channel, stride=1),
-            nn.BatchNorm2d(out_channel),
-            nn.ReLU()
+        super(SFA, self).__init__()
+        self.branch0 = nn.Sequential(
+            basicConv(in_channel, out_channel, 1, relu=False),
         )
-        self.up = nn.Sequential(
-            nn.ConvTranspose2d(out_channel, out_channel, kernel_size=2, stride=2, padding=0),
-            nn.BatchNorm2d(out_channel),
-            nn.ReLU()
+        self.branch1 = nn.Sequential(
+            basicConv(in_channel, out_channel, 1),
+            basicConv(out_channel, out_channel, k=7, p=3),
+            basicConv(out_channel, out_channel, 3, p=7, d=7, relu=False)
         )
+        self.branch2 = nn.Sequential(
+            basicConv(in_channel, out_channel, 1),
+            basicConv(out_channel, out_channel, k=7, p=3),
+            basicConv(out_channel, out_channel, k=7, p=3),
+            basicConv(out_channel, out_channel, 3, p=7, d=7, relu=False)
+        )
+        self.mask_att1 = MaskAttention(out_channel)
+        self.mask_att2 = MaskAttention(out_channel)
+        self.mask_att3 = MaskAttention(out_channel)
 
-        self.css = CrossStrengthen(out_channel)
+        self.fuse = nn.Sequential(nn.Conv2d(out_channel * 3, out_channel, kernel_size=1), nn.Conv2d(out_channel, out_channel, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(out_channel), nn.ReLU(inplace=True))
 
     def forward(self, x, y):
-        _, _, H1, _ = x.size()
-        _, _, H2, _ = y.size()
-        if H1 != H2:
-            y = self.up(y)
-        x = self.down_channel(x)
-        out = self.css(y, x)
+
+        N, C, H, W = x.size()
+        x0 = F.interpolate(self.branch0(x), H)
+        x1 = F.interpolate(self.branch1(x), H)
+        x2 = F.interpolate(self.branch2(x), H)
+        if x.size() != y.size():
+            y = F.interpolate(y, H)
+        x0 = self.mask_att1(x0, y)
+        x1 = self.mask_att2(x1, y)
+        x2 = self.mask_att3(x2, y)
+
+        out = torch.cat((x0, x1, x2), 1)
+        out = self.fuse(out)
+        return out
+
+    def initialize(self):
+        weight_init(self)
+
+class MaskAttention(nn.Module):
+    def __init__(self, channel):
+        super(MaskAttention, self).__init__()
+        LayerNorm_type = 'WithBias'
+        bias = False
+        ffn_expansion_factor = 4
+        dim = 64
+        num_heads = 8
+        mode = 'dilation'
+        self.conv_1 = conv3x3(channel, channel)
+        self.bn_1 = nn.BatchNorm2d(channel)
+        self.conv_2 = conv3x3(channel, channel)
+        self.bn_2 = nn.BatchNorm2d(channel)
+        self.norm1 = LayerNorm(dim, LayerNorm_type)
+        self.attn = Attention(dim, num_heads, bias, mode)
+        self.norm2 = LayerNorm(dim, LayerNorm_type)
+        self.ffn = FeedForward(dim, ffn_expansion_factor, bias)
+        self.fuse = nn.Sequential(nn.Conv2d(dim, dim, kernel_size=1), nn.Conv2d(dim, dim, kernel_size=3, padding=1),
+                                   nn.BatchNorm2d(dim), nn.ReLU(inplace=True))
+
+    def forward(self, x, y):
+        x = x * y
+        out = F.relu(self.bn_1(self.conv_1(x)), inplace=True)
+        out = F.relu(self.bn_2(self.conv_2(out)), inplace=True)
+        out = out + self.attn(self.norm1(out))
+        out = out + self.ffn(self.norm2(out))
+        out = self.fuse(x + x * out)
         return out
 
     def initialize(self):
@@ -255,11 +302,64 @@ class WithBias_LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.normalized_shape = normalized_shape
 
-
     def forward(self, x):
         mu = x.mean(-1, keepdim=True)
         sigma = x.var(-1, keepdim=True, unbiased=False)
         return (x - mu) / torch.sqrt(sigma+1e-5) * self.weight + self.bias
+
+    def initialize(self):
+        weight_init(self)
+
+class SFTA(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(SFTA, self).__init__()
+        self.down_channel = nn.Sequential(
+            conv3x3(in_channel, out_channel, stride=1),
+            nn.BatchNorm2d(out_channel)
+        )
+        self.down = nn.Sequential(
+            conv3x3(in_channel, out_channel, stride=2),
+            nn.BatchNorm2d(out_channel)
+        )
+        self.up = nn.Sequential(
+            nn.ConvTranspose2d(out_channel, out_channel, kernel_size=2, stride=2, padding=0),
+            nn.BatchNorm2d(out_channel)
+        )
+
+        self.bn1 = nn.BatchNorm2d(out_channel * 2)
+        self.bn2 = nn.BatchNorm2d(out_channel * 2)
+
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+
+        self.css1 = CrossStrengthen(out_channel)
+        self.css2 = CrossStrengthen(out_channel)
+        self.refine1 = nn.Conv2d(out_channel * 2, out_channel // 2, kernel_size=1, stride=1, padding=0)
+        self.refine2 = nn.ConvTranspose2d(out_channel * 2, out_channel // 2, kernel_size=2, stride=2, padding=0)
+    def forward(self, x, y):
+        # make two feature into same channel
+        # in order to make them can fit in the same scale, high means bigger size tensor
+        x_high = self.down_channel(x)
+        y_high = self.up(y)
+
+        x_low = self.down(x)
+        y_low = y
+
+        out_high = self.css1(x_high, y_high)
+        out_low = self.css2(x_low, y_low)
+
+        out_high = self.bn1(out_high)
+        out_low = self.bn2(out_low)
+
+        out_high = self.relu1(out_high)
+        out_low = self.relu2(out_low)
+
+        out_high = self.refine1(out_high)
+        out_low = self.refine2(out_low)
+
+        out = torch.cat((out_high, out_low), 1)
+
+        return out
 
     def initialize(self):
         weight_init(self)
@@ -277,72 +377,66 @@ class h_swish(nn.Module):
 
 
 class CrossStrengthen(nn.Module):
-    def  __init__(self, dim, num_heads=8, bias=False, LayerNorm_type='WithBias'):
+    def __init__(self, outchannel, reduction=32):
         super(CrossStrengthen, self).__init__()
-        self.num_heads = num_heads
-        self.temperature1 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature2 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature3 = nn.Parameter(torch.ones(num_heads, num_heads, 1))
-        ffn_expansion_factor = 4
-        # x
-        self.qkv_x_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_x_1 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_x_2 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
 
-        self.qkvx1conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
-        self.qkvx2conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
-        self.qkvx3conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
+        self.pool_h_x = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w_x = nn.AdaptiveAvgPool2d((1, None))
+        mip = max(8, outchannel // reduction)
 
-        # y
-        self.qkv_y_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_y_1 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.qkv_y_2 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
+        self.conv1_x = nn.Conv2d(outchannel, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1_x = nn.BatchNorm2d(mip)
+        self.act_x = h_swish()
 
-        self.qkvy1conv = nn.Conv2d(dim, dim, kernel_size=3, stride=2, padding=1, groups=dim, bias=bias)
-        self.qkvy2conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
-        self.qkvy3conv = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim, bias=bias)
+        self.conv_h_x = nn.Conv2d(mip, outchannel, kernel_size=1, stride=1, padding=0)
+        self.conv_w_x = nn.Conv2d(mip, outchannel, kernel_size=1, stride=1, padding=0)
 
-        self.project_out = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
-        self.ffn = FeedForward(dim, ffn_expansion_factor, bias)
-        self.norm = LayerNorm(dim, LayerNorm_type)
-        self.norm_x = LayerNorm(dim, LayerNorm_type)
-        self.norm_y = LayerNorm(dim, LayerNorm_type)
-        self.fuse = nn.Sequential(nn.Conv2d(dim, dim, kernel_size=1), nn.Conv2d(dim, dim, kernel_size=3, padding=1),
-                                  nn.BatchNorm2d(dim), nn.ReLU(inplace=True))
-    # x last y feature
+        self.pool_h_y = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w_y = nn.AdaptiveAvgPool2d((1, None))
+
+        self.conv1_y = nn.Conv2d(outchannel, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1_y = nn.BatchNorm2d(mip)
+        self.act_y = h_swish()
+
+        self.conv_h_y = nn.Conv2d(mip, outchannel, kernel_size=1, stride=1, padding=0)
+        self.conv_w_y = nn.Conv2d(mip, outchannel, kernel_size=1, stride=1, padding=0)
+
+
     def forward(self, x, y):
-        input = x
-        # Attention part
-        B, C, H, W = x.shape
-        x = self.norm_x(x)
-        y = self.norm_y(y)
-        qx = self.qkvx1conv(self.qkv_x_0(x))
-        kx = self.qkvx2conv(self.qkv_x_1(x))
-        vx = self.qkvx3conv(self.qkv_x_2(x))
-        qx = rearrange(qx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        kx = rearrange(kx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        vx = rearrange(vx, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        qx = torch.nn.functional.normalize(qx, dim=-1)
-        kx = torch.nn.functional.normalize(kx, dim=-1)
+        identity1 = x
+        identity2 = y
 
-        qy = self.qkvy1conv(self.qkv_y_0(y))
-        ky = self.qkvy2conv(self.qkv_y_1(y))
-        vy = self.qkvy3conv(self.qkv_y_2(y))
-        qy = rearrange(qy, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        ky = rearrange(ky, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        vy = rearrange(vy, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-        qy = torch.nn.functional.normalize(qy, dim=-1)
-        ky = torch.nn.functional.normalize(ky, dim=-1)
+        nx, cx, hx, wx = x.size()
+        x_h = self.pool_h_x(x)
+        x_w = self.pool_w_x(x).permute(0, 1, 3, 2)
+        x_att = torch.cat([x_h, x_w], dim=2)
+        x_att = self.conv1_x(x_att)
+        x_att = self.bn1_x(x_att)
+        x_att = self.act_x(x_att)
 
-        attnx = ((qx @ ky.transpose(-2, -1)) * self.temperature1).softmax(dim=-1)
-        attny = ((qy @ kx.transpose(-2, -1)) * self.temperature2).softmax(dim=-1)
+        x_h, x_w = torch.split(x_att, [hx, wx], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
 
-        out = (attnx @ attny @ vx) @ (vx.transpose(-2, -1) @ vy) * self.temperature3
-        out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=H, w=W)
-        out = self.project_out(out)
-        out = input + out
-        out = out + self.ffn(self.norm(out))
-        out = self.fuse(input + input * out)
+        a1_h = self.conv_h_x(x_h).sigmoid()
+        a1_w = self.conv_w_x(x_w).sigmoid()
+
+        ny, cy, hy, wy = x.size()
+        y_h = self.pool_h_y(y)
+        y_w = self.pool_w_y(y).permute(0, 1, 3, 2)
+        y_att = torch.cat([y_h, y_w], dim=2)
+        y_att = self.conv1_y(y_att)
+        y_att = self.bn1_y(y_att)
+        y_att = self.act_y(y_att)
+        y_h, y_w = torch.split(y_att, [hy, wy], dim=2)
+        y_w = y_w.permute(0, 1, 3, 2)
+
+        a2_h = self.conv_h_y(y_h).sigmoid()
+        a2_w = self.conv_w_y(y_w).sigmoid()
+        out1 = identity1 * a1_w * a1_h * a2_w * a2_h
+        out2 = identity2 * a1_w * a1_h * a2_w * a2_h
+
+        out = torch.cat((out1, out2), 1)
+
         return out
     def initialize(self):
         weight_init(self)
@@ -372,12 +466,11 @@ class OutPut(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, channels):
         super(Decoder, self).__init__()
-        self.pyramid_pooling = PyramidPooling(512, channels)
-        # self.conv = nn.Conv2d(512, channels, 1, padding='same')
-        self.sfa1 = SFTA(512, channels)
-        self.sfa2 = SFTA(320, channels)
-        self.sft1 = SFTA(128, channels)
-        self.sft2 = SFTA(64, channels)
+        self.pyramid_pooling = PyramidPooling(512, 64)
+        self.sfa1 = SFA(512, 64)
+        self.sfa2 = SFA(320, 64)
+        self.sft1 = SFTA(128, 64)
+        self.sft2 = SFTA(64, 64)
         self.out1 = OutPut(in_chs=channels, scale=32)
         self.out2 = OutPut(in_chs=channels, scale=32)
         self.out3 = OutPut(in_chs=channels, scale=16)
@@ -387,7 +480,6 @@ class Decoder(nn.Module):
     def forward(self, E1, E2, E3, E4, shape):
         # E1 512 12 E2 320 24 E3 128 48 E4 64 96 96
         SM = self.pyramid_pooling(E1)
-        # SM = self.conv(E1)
         S4 = self.sfa1(E1, SM)
         S3 = self.sfa2(E2, S4)
         S2 = self.sft1(E3, S3)

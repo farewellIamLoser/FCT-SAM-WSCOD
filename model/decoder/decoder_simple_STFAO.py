@@ -143,7 +143,7 @@ class h_sigmoid(nn.Module):
     def initialize(self):
         weight_init(self)
 
-class SFTA(nn.Module):
+class SFA(nn.Module):
     def __init__(self, in_channel, out_channel):
         super(SFTA, self).__init__()
         self.down_channel = nn.Sequential(
@@ -264,6 +264,57 @@ class WithBias_LayerNorm(nn.Module):
     def initialize(self):
         weight_init(self)
 
+class SFTA(nn.Module):
+    def __init__(self, in_channel, out_channel):
+        super(SFTA, self).__init__()
+        self.down_channel = nn.Sequential(
+            conv3x3(in_channel, out_channel, stride=1),
+            nn.BatchNorm2d(out_channel)
+        )
+        self.down = nn.Sequential(
+            conv3x3(in_channel, out_channel, stride=2),
+            nn.BatchNorm2d(out_channel)
+        )
+        self.up = nn.Sequential(
+            nn.ConvTranspose2d(out_channel, out_channel, kernel_size=2, stride=2, padding=0),
+            nn.BatchNorm2d(out_channel)
+        )
+
+        self.bn1 = nn.BatchNorm2d(out_channel)
+        self.bn2 = nn.BatchNorm2d(out_channel)
+
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+
+        self.css1 = CrossStrengthen(out_channel)
+        self.css2 = CrossStrengthen(out_channel)
+        self.refine1 = nn.Conv2d(out_channel, out_channel // 2, kernel_size=1, stride=1, padding=0)
+        self.refine2 = nn.ConvTranspose2d(out_channel, out_channel // 2, kernel_size=2, stride=2, padding=0)
+    def forward(self, x, y):
+        # make two feature into same channel
+        # in order to make them can fit in the same scale, high means bigger size tensor
+        x_high = self.down_channel(x)
+        y_high = self.up(y)
+
+        x_low = self.down(x)
+        y_low = y
+
+        out_high = self.css1(x_high, y_high)
+        out_low = self.css2(x_low, y_low)
+
+        out_high = self.bn1(out_high)
+        out_low = self.bn2(out_low)
+
+        out_high = self.relu1(out_high)
+        out_low = self.relu2(out_low)
+
+        out_high = self.refine1(out_high)
+        out_low = self.refine2(out_low)
+
+        out = torch.cat((out_high, out_low), 1)
+
+        return out
+
 class h_swish(nn.Module):
     def __init__(self, inplace=True):
         super(h_swish, self).__init__()
@@ -277,12 +328,12 @@ class h_swish(nn.Module):
 
 
 class CrossStrengthen(nn.Module):
-    def  __init__(self, dim, num_heads=8, bias=False, LayerNorm_type='WithBias'):
+    def __init__(self, dim, num_heads=8, bias=False, LayerNorm_type='WithBias'):
         super(CrossStrengthen, self).__init__()
         self.num_heads = num_heads
-        self.temperature1 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature2 = nn.Parameter(torch.ones(num_heads, num_heads, num_heads))
-        self.temperature3 = nn.Parameter(torch.ones(num_heads, num_heads, 1))
+        self.temperature1 = nn.Parameter(torch.ones(num_heads, 1, 1))
+        self.temperature2 = nn.Parameter(torch.ones(num_heads, 1, 1))
+        self.temperature3 = nn.Parameter(torch.ones(num_heads, 1, 1))
         ffn_expansion_factor = 4
         # x
         self.qkv_x_0 = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
@@ -309,7 +360,7 @@ class CrossStrengthen(nn.Module):
         self.norm_y = LayerNorm(dim, LayerNorm_type)
         self.fuse = nn.Sequential(nn.Conv2d(dim, dim, kernel_size=1), nn.Conv2d(dim, dim, kernel_size=3, padding=1),
                                   nn.BatchNorm2d(dim), nn.ReLU(inplace=True))
-    # x last y feature
+
     def forward(self, x, y):
         input = x
         # Attention part
@@ -340,6 +391,7 @@ class CrossStrengthen(nn.Module):
         out = (attnx @ attny @ vx) @ (vx.transpose(-2, -1) @ vy) * self.temperature3
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=H, w=W)
         out = self.project_out(out)
+
         out = input + out
         out = out + self.ffn(self.norm(out))
         out = self.fuse(input + input * out)
@@ -373,9 +425,8 @@ class Decoder(nn.Module):
     def __init__(self, channels):
         super(Decoder, self).__init__()
         self.pyramid_pooling = PyramidPooling(512, channels)
-        # self.conv = nn.Conv2d(512, channels, 1, padding='same')
-        self.sfa1 = SFTA(512, channels)
-        self.sfa2 = SFTA(320, channels)
+        self.sfa1 = SFA(512, channels)
+        self.sfa2 = SFA(320, channels)
         self.sft1 = SFTA(128, channels)
         self.sft2 = SFTA(64, channels)
         self.out1 = OutPut(in_chs=channels, scale=32)
@@ -387,7 +438,6 @@ class Decoder(nn.Module):
     def forward(self, E1, E2, E3, E4, shape):
         # E1 512 12 E2 320 24 E3 128 48 E4 64 96 96
         SM = self.pyramid_pooling(E1)
-        # SM = self.conv(E1)
         S4 = self.sfa1(E1, SM)
         S3 = self.sfa2(E2, S4)
         S2 = self.sft1(E3, S3)
