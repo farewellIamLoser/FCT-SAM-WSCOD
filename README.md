@@ -156,11 +156,10 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 ---
 
 ## 💾 模型权重下载
-
-|    模型    |        下载链接       |  说明  |
+| 模型    | 下载链接 | 说明       |
 | :------: | :---------------: | :--: |
-| Baseline | [Google Drive](#) | 原始模型 |
-|   Ours   |  [Baidu Cloud](#) | 改进版本 |
+| Baseline | [Google Drive](https://drive.google.com/your_file_link) | 原始模型 |
+| Ours     | [Baidu Cloud](https://pan.baidu.com/s/1F8SK34brd-Nhqjy4sQ8iCw) (提取码: rnig) | 改进版本 |
 
 ---
 
