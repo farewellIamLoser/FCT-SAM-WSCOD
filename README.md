@@ -29,12 +29,12 @@ project/
 
 ### 1️⃣ 创建环境并安装依赖
 ```bash
-git clone https://github.com/username/project.git
-cd project
+git clone https://github.com/farewellIamLoser/FCT-SAM-WSCOD.git
+cd FCT-SAM-WSCOD
 
 # 可选：使用conda环境
-conda create -n project python=3.10
-conda activate project
+conda create -n FCT_SAM_WSCOD python=3.10
+conda activate FCT_SAM_WSCOD
 
 # 安装依赖
 pip install -r requirements.txt
@@ -180,11 +180,15 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 如需引用本项目或论文，请使用以下格式：
 
 ```bibtex
-@article{your_paper_2025,
-  title={Your Paper Title},
-  author={Your Name},
-  journal={ArXiv preprint arXiv:2501.00000},
-  year={2025}
+@inproceedings{wu2025scribble,
+  author    = {Zi-Jie Wu and Rongrong Gao and Tian-Zhu Xiang},
+  title     = {Scribble-Based Weakly Supervised Camouflaged Object Detection via {SAM}-Guided Feature Correlation Transformer},
+  booktitle = {Proceedings of the 27th European Conference on Artificial Intelligence (ECAI 2025)},
+  series    = {Frontiers in Artificial Intelligence and Applications},
+  pages     = {122--129},
+  year      = {2025},
+  publisher = {IOS Press},
+  doi       = {10.3233/FAIA250797}
 }
 ```
 
@@ -203,13 +207,9 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 ## 🧰 联系方式
 
 如有问题或建议，请联系：
-📧 Email: [your_email@example.com](mailto:your_email@example.com)
-👤 Author: Your Name
+📧 Email: [1021188717@qq.com](mailto:1021188717@qq.com)
+👤 Author: Wuzijie
 
 ```
 
 ---
-
-是否希望我帮你改成一个「针对你自己的项目」（比如 COD 训练）版本？  
-我可以自动填好数据集名称、模型结构描述（ViT/Mamba/SAM 等）和指标表，让你直接用在GitHub或论文仓库。
-```
