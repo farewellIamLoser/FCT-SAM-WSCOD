@@ -201,7 +201,7 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 * [PyTorch](https://pytorch.org/)
 * [timm](https://github.com/rwightman/pytorch-image-models)
 * [Segment Anything (SAM)](https://github.com/facebookresearch/segment-anything)
-
+* [CamoFormer]([https://github.com/rwightman/pytorch-image-models](https://github.com/HVision-NKU/CamoFormer))
 ---
 
 ## 🧰 联系方式
@@ -211,5 +211,3 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 👤 Author: Wuzijie
 
 ```
-
----
