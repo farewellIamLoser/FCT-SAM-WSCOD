@@ -125,10 +125,10 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 
 |     指标    |      含义      |
 | :-------: | :----------: |
-|    MAE    |    平均绝对误差    |
-| F-measure | 精确率与召回率的调和平均 |
-|    IoU    |      交并比     |
-|    Dice   |    Dice 系数   |
+|    MAE    |    平均绝对误差（衡量预测结果与真实掩码的像素差异，越小越好）    |
+| adaptive F-measure | 自适应 F 值（基于精确率 Precision 与召回率 Recall 的调和平均，综合衡量检测性能） |
+|    mean E-measure    |      平均 E 值（同时考虑像素级与结构级一致性，反映预测掩码与真实掩码的整体相似度）     |
+|    structure-measure   |    结构相似度指标（衡量预测掩码与真实掩码在结构和区域层面的相似程度）   |
 
 ### 评估结果保存
 
@@ -142,8 +142,8 @@ python evaluate.py --model output/checkpoints/best.pth --data ./datasets/test
 |   数据集  |  MAE  |   Fβ  |  IoU  | 参数量(M) |
 | :----: | :---: | :---: | :---: | :----: |
 | COD10K | 0.031 | 0.864 | 0.771 |  27.6  |
-|  CAMO  | 0.052 | 0.828 | 0.695 |  27.6  |
-
+|  CAMO  | 0.055 | 0.828 | 0.695 |  27.6  |
+|  N4CK  | 0.052 | 0.828 | 0.695 |  27.6  |
 > 可将你训练所得结果替换表格中的值。
 > 若有可视化结果，可将样例图放在 `/results/` 下并附链接。
 
