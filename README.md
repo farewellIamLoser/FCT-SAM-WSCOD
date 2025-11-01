@@ -1,5 +1,3 @@
-
-```markdown
 # 🧠 Model Training and Evaluation
 
 本项目旨在实现一个基于深度学习的视觉模型，用于图像分析与预测任务（如目标检测、语义分割或伪装目标检测）。  
@@ -8,6 +6,7 @@
 ---
 
 ## 📁 项目结构
+```text
 project/
 │
 ├── configs/             # 配置文件（如超参数设置）
@@ -18,7 +17,7 @@ project/
 ├── utils/               # 工具函数（日志、度量指标、可视化）
 ├── requirements.txt     # 环境依赖
 └── README.md            # 说明文档（本文件）
-
+```
 
 ## ⚙️ 环境配置
 
@@ -27,7 +26,7 @@ project/
 git clone https://github.com/farewellIamLoser/FCT-SAM-WSCOD.git
 cd FCT-SAM-WSCOD
 
-# 可选：使用conda环境
+# 可选：使用 conda 环境（环境名建议用下划线）
 conda create -n FCT_SAM_WSCOD python=3.10
 conda activate FCT_SAM_WSCOD
 
