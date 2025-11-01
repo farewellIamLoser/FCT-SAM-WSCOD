@@ -33,7 +33,7 @@ conda activate FCT_SAM_WSCOD
 
 # 安装依赖
 pip install -r requirements.txt
-````
+```
 
 ### 2️⃣ 主要依赖包（requirements.txt 示例）
 
